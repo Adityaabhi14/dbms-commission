@@ -1,0 +1,559 @@
+// ==============================================================================
+// APD MUSIC CLASS — PRODUCTION-GRADE RELATIONAL DATABASE SCHEMA (PHASE 3)
+// Database Engine: PostgreSQL 15+ / 16+
+// Normalization Target: Third Normal Form (3NF) / Boyce-Codd Normal Form (BCNF)
+// Timezone: Asia/Kolkata (IST)
+// Currency: INR (Numeric / Decimal(10, 2))
+// ==============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------------------------
+
+enum UserRole {
+  CLIENT
+  OWNER
+  STAFF
+}
+
+enum MembershipStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  CANCELLED
+  SUSPENDED
+}
+
+enum BookingStatus {
+  CONFIRMED
+  COMPLETED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  COLLECTED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  NET_BANKING
+  CASH
+}
+
+enum ExpenseCategoryType {
+  STUDIO_RENT
+  TEACHER_COMPENSATION
+  EQUIPMENT_MAINTENANCE
+  UTILITIES_ACOUSTIC_TECH
+  MARKETING
+  OTHER_OPERATIONAL
+}
+
+enum AcousticRoomType {
+  PIANO_SUITE
+  DRUM_ISOLATION_BOOTH
+  STRINGS_STUDIO
+  INDIAN_CLASSICAL_CHAMBER
+  ENSEMBLE_HALL
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMATION
+  BOOKING_RESCHEDULED
+  BOOKING_CANCELLED
+  MEMBERSHIP_EXPIRING_SOON
+  MEMBERSHIP_EXPIRED
+  PAYMENT_RECEIPT
+  REFUND_PROCESSED
+  ADMIN_ALERT
+}
+
+// ------------------------------------------------------------------------------
+// 1. AUTHENTICATION, USERS & PROFILES
+// ------------------------------------------------------------------------------
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique // Case-insensitive unique via LOWER(email) in migration
+  passwordHash String        @map("password_hash")
+  fullName     String        @map("full_name")
+  phone        String?
+  role         UserRole      @default(CLIENT)
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  memberProfile Member?
+  ownerProfile  OwnerProfile?
+  teacherProfile Teacher?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  processedRefunds Refund[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model OwnerProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique @map("user_id")
+  department   String   @default("Executive Administration")
+  permissions  Json?    // Granular administrative permissions
+  accessLevel  String   @default("DIRECTOR") @map("access_level")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("owner_profiles")
+}
+
+model Member {
+  id                   String           @id // Structured ID: e.g. "APD-M-1001"
+  userId               String           @unique @map("user_id")
+  fullName             String           @map("full_name")
+  email                String           @unique
+  phone                String
+  enrolledInstrumentId String           @map("enrolled_instrument_id")
+  branchId             String           @map("branch_id")
+  status               MembershipStatus @default(ACTIVE)
+  notes                String?
+  emergencyContact     String?          @map("emergency_contact")
+  totalClassesAttended Int              @default(0) @map("total_classes_attended")
+  isActive             Boolean          @default(true) @map("is_active")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch               Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  instrument           Instrument       @relation(fields: [enrolledInstrumentId], references: [id], onDelete: Restrict)
+  memberships          Membership[]
+  bookings             Booking[]
+  payments             Payment[]
+
+  @@index([branchId])
+  @@index([enrolledInstrumentId])
+  @@index([status])
+  @@map("members")
+}
+
+// ------------------------------------------------------------------------------
+// 2. ACADEMY INFRASTRUCTURE: BRANCHES, ROOMS & INSTRUMENTS
+// ------------------------------------------------------------------------------
+
+model Branch {
+  id              String   @id // e.g. "madhapur", "kokila", "himayatnagar"
+  name            String
+  city            String   @default("Hyderabad")
+  area            String
+  address         String
+  phone           String
+  email           String
+  dailyClassHours String   @default("8:00 AM - 6:00 PM") @map("daily_class_hours")
+  classSlotsCount Int      @default(10) @map("class_slots_count")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  rooms           Room[]
+  members         Member[]
+  teacherBranches TeacherBranch[]
+  branchInstruments BranchInstrument[]
+  memberships     Membership[]
+  bookings        Booking[]
+  expenses        Expense[]
+  payments        Payment[]
+  planPricings    PlanPricing[]
+
+  @@map("branches")
+}
+
+model Room {
+  id           String           @id @default(uuid())
+  branchId     String           @map("branch_id")
+  roomNumber   Int              @map("room_number")
+  name         String           // e.g. "Studio 1 - Grand Piano Suite"
+  acousticType AcousticRoomType @default(PIANO_SUITE) @map("acoustic_type")
+  capacity     Int              @default(1) // 1 for 1-on-1 private masterclasses
+  isActive     Boolean          @default(true) @map("is_active")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  branch       Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
+
+  @@unique([branchId, roomNumber])
+  @@index([branchId])
+  @@map("rooms")
+}
+
+model Instrument {
+  id                    String   @id // e.g. "guitar", "piano", "drums", "sitar", "violin", "ukulele", "trumpet"
+  name                  String
+  category              String   // Strings, Percussion, Indian Classical, Wind
+  description           String
+  startingPricePerMonth Decimal  @map("starting_price_per_month") @db.Decimal(10, 2)
+  isActive              Boolean  @default(true) @map("is_active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  members               Member[]
+  teacherInstruments    TeacherInstrument[]
+  branchInstruments     BranchInstrument[]
+  memberships           Membership[]
+  planPricings          PlanPricing[]
+  bookings              Booking[]
+  payments              Payment[]
+  expenses              Expense[]
+
+  @@map("instruments")
+}
+
+model BranchInstrument {
+  branchId     String     @map("branch_id")
+  instrumentId String     @map("instrument_id")
+  isActive     Boolean    @default(true) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  branch       Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  instrument   Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@id([branchId, instrumentId])
+  @@map("branch_instruments")
+}
+
+// ------------------------------------------------------------------------------
+// 3. FACULTY: TEACHERS, CERTIFICATIONS & AVAILABILITY
+// ------------------------------------------------------------------------------
+
+model Teacher {
+  id               String   @id // e.g. "APD-T-201"
+  userId           String?  @unique @map("user_id")
+  fullName         String   @map("full_name")
+  email            String   @unique
+  phone            String
+  employmentStatus String   @default("Active") @map("employment_status")
+  joiningDate      DateTime @default(now()) @map("joining_date")
+  bio              String?
+  rating           Decimal  @default(5.0) @db.Decimal(3, 2)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  instruments      TeacherInstrument[]
+  branches         TeacherBranch[]
+  availabilities   TeacherAvailability[]
+  bookings         Booking[]
+
+  @@map("teachers")
+}
+
+model TeacherInstrument {
+  teacherId        String     @map("teacher_id")
+  instrumentId     String     @map("instrument_id")
+  isPrimary        Boolean    @default(true) @map("is_primary")
+  yearsExperience  Int        @default(5) @map("years_experience")
+  createdAt        DateTime   @default(now()) @map("created_at")
+
+  teacher          Teacher    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  instrument       Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, instrumentId])
+  @@map("teacher_instruments")
+}
+
+model TeacherBranch {
+  teacherId    String   @map("teacher_id")
+  branchId     String   @map("branch_id")
+  isHomeBranch Boolean  @default(false) @map("is_home_branch")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  teacher      Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  branch       Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, branchId])
+  @@map("teacher_branches")
+}
+
+model TeacherAvailability {
+  id          String   @id @default(uuid())
+  teacherId   String   @map("teacher_id")
+  dayOfWeek   Int      @map("day_of_week") // 0=Sunday, 1=Monday ... 6=Saturday
+  slotId      Int      @map("slot_id") // 1 to 10
+  isAvailable Boolean  @default(true) @map("is_available")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  slot        ClassSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, dayOfWeek, slotId])
+  @@index([teacherId, dayOfWeek])
+  @@map("teacher_availabilities")
+}
+
+// ------------------------------------------------------------------------------
+// 4. MEMBERSHIP PLANS & IMMUTABLE PRICING MATRIX
+// ------------------------------------------------------------------------------
+
+model MembershipPlan {
+  id                 String   @id // e.g. "1-month", "3-months", "6-months", "12-months"
+  durationMonths     Int      @map("duration_months")
+  title              String
+  description        String
+  discountPercentage Decimal  @default(0.0) @map("discount_percentage") @db.Decimal(5, 2)
+  badge              String?
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  memberships        Membership[]
+  planPricings       PlanPricing[]
+
+  @@map("membership_plans")
+}
+
+model PlanPricing {
+  id               String         @id @default(uuid())
+  planId           String         @map("plan_id")
+  instrumentId     String         @map("instrument_id")
+  branchId         String?        @map("branch_id")
+  baseRatePerMonth Decimal        @map("base_rate_per_month") @db.Decimal(10, 2)
+  rawSubtotal      Decimal        @map("raw_subtotal") @db.Decimal(10, 2)
+  discountAmount   Decimal        @map("discount_amount") @db.Decimal(10, 2)
+  finalTuitionFee  Decimal        @map("final_tuition_fee") @db.Decimal(10, 2)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  plan             MembershipPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  instrument       Instrument     @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  branch           Branch?        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, instrumentId, branchId])
+  @@index([planId])
+  @@index([instrumentId])
+  @@map("plan_pricings")
+}
+
+model Membership {
+  id                      String           @id @default(uuid())
+  memberId                String           @map("member_id")
+  planId                  String           @map("plan_id")
+  instrumentId            String           @map("instrument_id")
+  branchId                String           @map("branch_id")
+  startDate               DateTime         @map("start_date") @db.Date
+  expiryDate              DateTime         @map("expiry_date") @db.Date
+  status                  MembershipStatus @default(ACTIVE)
+  paymentStatus           PaymentStatus    @default(COLLECTED) @map("payment_status")
+  
+  // Immutable Purchase Snapshot (Guarantees historical integrity when plan prices change)
+  basePriceSnapshot       Decimal          @map("base_price_snapshot") @db.Decimal(10, 2)
+  discountAmountSnapshot  Decimal          @default(0.0) @map("discount_amount_snapshot") @db.Decimal(10, 2)
+  payableAmountSnapshot   Decimal          @map("payable_amount_snapshot") @db.Decimal(10, 2)
+  planTitleSnapshot       String           @map("plan_title_snapshot")
+  
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
+
+  member                  Member           @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  plan                    MembershipPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  instrument              Instrument       @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  branch                  Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  bookings                Booking[]
+  payments                Payment[]
+
+  @@index([memberId])
+  @@index([expiryDate])
+  @@index([status, expiryDate])
+  @@index([branchId])
+  @@index([instrumentId])
+  @@map("memberships")
+}
+
+// ------------------------------------------------------------------------------
+// 5. CLASS SLOTS & BOOKINGS ENGINE
+// ------------------------------------------------------------------------------
+
+model ClassSlot {
+  id         Int      @id // 1 to 10
+  slotNumber Int      @unique @map("slot_number")
+  label      String   // "08:00–09:00"
+  startTime  String   @map("start_time") // "08:00"
+  endTime    String   @map("end_time")   // "09:00"
+
+  availabilities TeacherAvailability[]
+  bookings       Booking[]
+
+  @@map("class_slots")
+}
+
+model Booking {
+  id                 String        @id // Structured ID: e.g. "APD-BKG-8801"
+  membershipId       String?       @map("membership_id")
+  memberId           String        @map("member_id")
+  branchId           String        @map("branch_id")
+  roomId             String?       @map("room_id")
+  instrumentId       String        @map("instrument_id")
+  teacherId          String?       @map("teacher_id")
+  classDate          DateTime      @map("class_date") @db.Date
+  slotId             Int           @map("slot_id") // 1 to 10
+  slotLabel          String        @map("slot_label")
+  status             BookingStatus @default(CONFIRMED)
+  paymentMode        String?       @map("payment_mode")
+  cancellationReason String?       @map("cancellation_reason")
+  rescheduledFromId  String?       @map("rescheduled_from_id")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  membership         Membership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  member             Member        @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  branch             Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  room               Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  instrument         Instrument    @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  teacher            Teacher?      @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  slot               ClassSlot     @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  payments           Payment[]
+
+  @@index([memberId])
+  @@index([teacherId])
+  @@index([classDate, slotId])
+  @@index([branchId, classDate])
+  @@index([status])
+  @@map("bookings")
+}
+
+// ------------------------------------------------------------------------------
+// 6. FINANCIAL LEDGER: PAYMENTS, REFUNDS & OPERATING EXPENSES
+// ------------------------------------------------------------------------------
+
+model Payment {
+  id             String        @id // Structured Receipt: e.g. "RCPT-9041"
+  membershipId   String?       @map("membership_id")
+  bookingId      String?       @map("booking_id")
+  memberId       String        @map("member_id")
+  branchId       String        @map("branch_id")
+  instrumentId   String?       @map("instrument_id")
+  amount         Decimal       @db.Decimal(10, 2)
+  refundAmount   Decimal       @default(0.0) @map("refund_amount") @db.Decimal(10, 2)
+  method         PaymentMethod @default(UPI)
+  status         PaymentStatus @default(COLLECTED)
+  transactionRef String?       @unique @map("transaction_ref") // Gateway transaction ID
+  idempotencyKey String?       @unique @map("idempotency_key") // Webhook idempotency key
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  membership     Membership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  booking        Booking?      @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  member         Member        @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  branch         Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  instrument     Instrument?   @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+  refunds        Refund[]
+
+  @@index([memberId])
+  @@index([branchId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model Refund {
+  id                String   @id // Structured ID: e.g. "RFND-501"
+  paymentId         String   @map("payment_id")
+  amount            Decimal  @db.Decimal(10, 2)
+  reason            String
+  processedByUserId String?  @map("processed_by_user_id")
+  gatewayRefundRef  String?  @unique @map("gateway_refund_ref")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  processedBy       User?    @relation(fields: [processedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@index([createdAt])
+  @@map("refunds")
+}
+
+model ExpenseCategory {
+  id             ExpenseCategoryType @id
+  name           String
+  description    String
+  allocationType String              @default("DIRECT") @map("allocation_type") // DIRECT, BRANCH_OVERHEAD, SHARED
+
+  expenses       Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id           String              @id // e.g. "EXP-401"
+  title        String
+  categoryId   ExpenseCategoryType @map("category_id")
+  branchId     String              @map("branch_id")
+  instrumentId String?             @map("instrument_id") // Optional direct attribution
+  amount       Decimal             @db.Decimal(10, 2)
+  vendor       String
+  date         DateTime            @db.Date
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  category     ExpenseCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  branch       Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  instrument   Instrument?         @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+
+  @@index([branchId])
+  @@index([categoryId])
+  @@index([date])
+  @@map("expenses")
+}
+
+// ------------------------------------------------------------------------------
+// 7. AUDIT LOGGING & NOTIFICATIONS
+// ------------------------------------------------------------------------------
+
+model AuditLog {
+  id                String   @id @default(uuid())
+  entityType        String   @map("entity_type")
+  entityId          String   @map("entity_id")
+  action            String   // CREATE, UPDATE, DELETE, RESCHEDULE, CANCEL, REFUND
+  performedByUserId String?  @map("performed_by_user_id")
+  changes           Json?
+  ipAddress         String?  @map("ip_address")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  performedBy       User?    @relation(fields: [performedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([performedByUserId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
