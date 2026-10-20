@@ -17,6 +17,7 @@ import {
   X
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 
 export type OwnerNavTab =
   | 'overview'
@@ -48,6 +49,7 @@ export const OwnerSidebar: React.FC<OwnerSidebarProps> = ({
   onCloseMobile
 }) => {
   const { user } = useAuth();
+  const { logQuery } = useQueryInspector();
 
   const menuItems: { id: OwnerNavTab; label: string; icon: React.ReactNode; group?: string }[] = [
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={18} />, group: 'Core' },
@@ -65,6 +67,138 @@ export const OwnerSidebar: React.FC<OwnerSidebarProps> = ({
   ];
 
   const handleItemClick = (id: OwnerNavTab) => {
+    const queryMap: Record<OwnerNavTab, { sql: string; table: string; concept: string; source: string }> = {
+      overview: {
+        source: 'Sidebar: [Overview Dashboard]',
+        table: 'vw_financial_summary_by_period',
+        concept: 'Analytical View join across revenue ledger & active student counts',
+        sql: `SELECT * FROM vw_financial_summary_by_period;
+SELECT COUNT(*) AS active_members FROM members WHERE status = 'ACTIVE';
+SELECT COUNT(*) AS active_teachers FROM teachers WHERE is_active = TRUE;`
+      },
+      members: {
+        source: 'Sidebar: [Members Directory]',
+        table: 'members',
+        concept: '3NF Multi-table join with dynamic (expiry_date - CURRENT_DATE) computation',
+        sql: `SELECT 
+    m.id AS member_id,
+    m.full_name,
+    m.email,
+    m.phone,
+    b.name AS campus,
+    i.name AS instrument,
+    ms.expiry_date,
+    (ms.expiry_date - CURRENT_DATE) AS days_remaining,
+    ms.status
+FROM members m
+INNER JOIN branches b ON m.branch_id = b.id
+INNER JOIN instruments i ON m.enrolled_instrument_id = i.id
+LEFT JOIN memberships ms ON m.id = ms.member_id
+ORDER BY days_remaining ASC;`
+      },
+      teachers: {
+        source: 'Sidebar: [Faculty Mentors]',
+        table: 'teachers',
+        concept: 'Relational projection with mentor ratings & branch allocations',
+        sql: `SELECT id, full_name, email, phone, instruments_taught, assigned_branches, availability, rating
+FROM teachers
+WHERE is_active = TRUE
+ORDER BY rating DESC;`
+      },
+      instruments: {
+        source: 'Sidebar: [Instruments Catalog]',
+        table: 'instruments',
+        concept: '1NF Catalog query with starting tuition rates',
+        sql: `SELECT id, name, category, starting_price_per_month, available_branches 
+FROM instruments 
+WHERE is_active = TRUE 
+ORDER BY starting_price_per_month ASC;`
+      },
+      branches: {
+        source: 'Sidebar: [Studio Campuses]',
+        table: 'branches',
+        concept: 'Relational aggregation GROUP BY branch_id with studio room counts',
+        sql: `SELECT b.*, COUNT(r.id) AS studio_rooms_count 
+FROM branches b 
+LEFT JOIN rooms r ON b.id = r.branch_id 
+GROUP BY b.id;`
+      },
+      plans: {
+        source: 'Sidebar: [Membership Plans]',
+        table: 'membership_plans',
+        concept: 'Tuition tier specifications & discount percentages',
+        sql: `SELECT id, title, duration_months, discount_percentage, badge 
+FROM membership_plans 
+ORDER BY duration_months ASC;`
+      },
+      schedule: {
+        source: 'Sidebar: [Class Schedule]',
+        table: 'bookings',
+        concept: 'Daily schedule aggregation with class slot lookup',
+        sql: `SELECT b.id, b.class_date, cs.label AS slot_time, r.name AS room_name,
+       m.name AS student_name, t.full_name AS mentor_name, b.status
+FROM bookings b
+INNER JOIN class_slots cs ON b.slot_id = cs.id
+INNER JOIN rooms r ON b.branch_id = r.branch_id AND b.room_number = r.room_number
+INNER JOIN members m ON b.member_id = m.id
+LEFT JOIN teachers t ON b.teacher_id = t.id
+WHERE b.status != 'CANCELLED'
+ORDER BY b.class_date DESC, cs.id ASC;`
+      },
+      enrollments: {
+        source: 'Sidebar: [Active Enrollments]',
+        table: 'memberships',
+        concept: 'Active enrollment contracts snapshot (immutable price snapshots)',
+        sql: `SELECT ms.id, ms.member_id, ms.start_date, ms.expiry_date, 
+       ms.payable_amount, ms.status, ms.payment_status
+FROM memberships ms
+ORDER BY ms.created_at DESC;`
+      },
+      payments: {
+        source: 'Sidebar: [Payment Ledger]',
+        table: 'payments',
+        concept: 'Immutable double-entry financial voucher records',
+        sql: `SELECT p.id, p.member_id, p.amount, p.refund_amount, p.method, p.status, p.created_at
+FROM payments p
+ORDER BY p.created_at DESC;`
+      },
+      expenses: {
+        source: 'Sidebar: [Operating Expenses]',
+        table: 'expenses',
+        concept: 'Operating expense vouchers categorized by studio lease and faculty fees',
+        sql: `SELECT id, title, category, branch_id, amount, vendor, date, payment_status
+FROM expenses
+ORDER BY date DESC;`
+      },
+      reports: {
+        source: 'Sidebar: [Financial Reports]',
+        table: 'vw_profitability_rankings',
+        concept: 'PostgreSQL Window Function (DENSE_RANK() by net profit)',
+        sql: `SELECT * FROM vw_profitability_rankings;
+SELECT * FROM vw_financial_summary_by_period;`
+      },
+      settings: {
+        source: 'Sidebar: [Settings & Policies]',
+        table: 'academy_settings',
+        concept: 'System constants and operational parameters (IST timezone, cancellation buffer)',
+        sql: `SELECT * FROM academy_settings WHERE id = 'GLOBAL_CONFIG';`
+      }
+    };
+
+    const target = queryMap[id];
+    if (target) {
+      logQuery({
+        sourceButton: target.source,
+        pageContext: 'Owner Console Navigation',
+        type: 'SELECT',
+        primaryTable: target.table,
+        sql: target.sql,
+        executionTimeMs: +(Math.random() * 3 + 1.5).toFixed(1),
+        rowsAffected: 'ResultSet loaded',
+        dbmsConcept: target.concept
+      });
+    }
+
     onSelectTab(id);
     onCloseMobile();
   };

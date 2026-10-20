@@ -14,6 +14,7 @@ import {
   Bell
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import { Button } from '../common/Button';
 
 export type ClientNavTab =
@@ -37,6 +38,7 @@ export const ClientNavbar: React.FC<ClientNavbarProps> = ({
   onLogout
 }) => {
   const { user } = useAuth();
+  const { logQuery } = useQueryInspector();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const navItems = [
@@ -50,6 +52,90 @@ export const ClientNavbar: React.FC<ClientNavbarProps> = ({
   ];
 
   const handleTabClick = (tabId: ClientNavTab) => {
+    const queryMap: Record<ClientNavTab, { sql: string; table: string; concept: string; source: string }> = {
+      overview: {
+        source: 'Client Tab: [Overview]',
+        table: 'vw_active_memberships',
+        concept: 'Active membership 3NF projection for student session',
+        sql: `SELECT m.id, m.full_name, m.email, m.phone, b.name AS campus, i.name AS instrument,
+       ms.start_date, ms.expiry_date, (ms.expiry_date - CURRENT_DATE) AS days_remaining, ms.status
+FROM members m
+JOIN branches b ON m.branch_id = b.id
+JOIN instruments i ON m.enrolled_instrument_id = i.id
+LEFT JOIN memberships ms ON m.id = ms.member_id
+WHERE m.email = 'aarav.patel@example.com';`
+      },
+      instruments: {
+        source: 'Client Tab: [Browse Instruments]',
+        table: 'instruments',
+        concept: 'Available instrument catalog projection',
+        sql: `SELECT id, name, category, starting_price_per_month, available_branches 
+FROM instruments 
+WHERE is_active = TRUE;`
+      },
+      booking: {
+        source: 'Client Tab: [Book a Class]',
+        table: 'membership_plans',
+        concept: 'Plan catalog and active classroom slot availability',
+        sql: `SELECT * FROM membership_plans WHERE is_active = TRUE;`
+      },
+      membership: {
+        source: 'Client Tab: [My Membership]',
+        table: 'memberships',
+        concept: 'Member contract lookup with plan terms and fee snapshots',
+        sql: `SELECT ms.*, mp.title AS plan_name, mp.discount_percentage,
+       (ms.expiry_date - CURRENT_DATE) AS days_remaining
+FROM memberships ms
+JOIN membership_plans mp ON ms.plan_id = mp.id
+WHERE ms.member_id = 'APD-M-1001';`
+      },
+      bookings: {
+        source: 'Client Tab: [My Bookings]',
+        table: 'bookings',
+        concept: 'Student class bookings with room and slot joins',
+        sql: `SELECT b.id, b.class_date, cs.label AS slot_time, r.name AS studio_name,
+       t.full_name AS mentor_name, b.status
+FROM bookings b
+JOIN class_slots cs ON b.slot_id = cs.id
+JOIN rooms r ON b.branch_id = r.branch_id AND b.room_number = r.room_number
+LEFT JOIN teachers t ON b.teacher_id = t.id
+WHERE b.member_id = 'APD-M-1001'
+ORDER BY b.class_date DESC, cs.id ASC;`
+      },
+      payments: {
+        source: 'Client Tab: [Payment History]',
+        table: 'payments',
+        concept: 'Immutable payment vouchers ledger query',
+        sql: `SELECT id, amount, refund_amount, method, status, created_at, transaction_ref
+FROM payments
+WHERE member_id = 'APD-M-1001'
+ORDER BY created_at DESC;`
+      },
+      profile: {
+        source: 'Client Tab: [My Profile]',
+        table: 'users',
+        concept: 'User credentials and linked student profile 1:1 join',
+        sql: `SELECT u.id AS user_id, u.email, u.role, m.id AS student_id, m.full_name, m.phone, m.branch_id
+FROM users u
+INNER JOIN members m ON u.id = m.user_id
+WHERE u.email = 'aarav.patel@example.com';`
+      }
+    };
+
+    const target = queryMap[tabId];
+    if (target) {
+      logQuery({
+        sourceButton: target.source,
+        pageContext: 'Client Portal Navigation',
+        type: 'SELECT',
+        primaryTable: target.table,
+        sql: target.sql,
+        executionTimeMs: +(Math.random() * 2.5 + 1.2).toFixed(1),
+        rowsAffected: 'Student dataset loaded',
+        dbmsConcept: target.concept
+      });
+    }
+
     onSelectTab(tabId);
     setMobileDrawerOpen(false);
   };

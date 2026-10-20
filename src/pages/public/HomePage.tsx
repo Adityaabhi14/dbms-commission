@@ -21,6 +21,7 @@ import { Card, CardBody } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import { InstrumentId, BranchId } from '../../types';
 
 interface HomePageProps {
@@ -35,6 +36,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onNavigateAuth
 }) => {
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
 
   // Contact Form state
   const [contactName, setContactName] = useState('');
@@ -78,6 +80,25 @@ export const HomePage: React.FC<HomePageProps> = ({
       return;
     }
     setContactSubmitting(true);
+
+    logQuery({
+      sourceButton: 'Button: [Submit Inquiry / Request Callback]',
+      pageContext: 'Public Landing Page Contact Form',
+      type: 'INSERT',
+      primaryTable: 'student_inquiries',
+      sql: `INSERT INTO student_inquiries (
+  id, full_name, email, phone, branch_id, 
+  instrument_id, message, status, created_at
+) VALUES (
+  'INQ-${Math.floor(1000 + Math.random() * 8999)}', '${contactName}', '${contactEmail}', 
+  '${contactPhone || '+91 90000 00000'}', '${contactBranch}', 
+  '${contactInstrument}', '${contactMsg.replace(/'/g, "''")}', 'PENDING_CALLBACK', NOW()
+);`,
+      executionTimeMs: 3.5,
+      rowsAffected: '1 inquiry ticket created',
+      dbmsConcept: 'Direct tuple insertion with transactional timestamp NOW()'
+    });
+
     setTimeout(() => {
       setContactSubmitting(false);
       showToast('Thank you! Our studio counselor will contact you shortly.', 'success');

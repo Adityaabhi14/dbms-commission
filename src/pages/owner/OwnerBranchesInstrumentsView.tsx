@@ -5,12 +5,14 @@ import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { formatCurrency } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import { Building2, Sparkles, MapPin, Phone, Mail, Clock, Check, Users } from 'lucide-react';
 
 export const OwnerBranchesInstrumentsView: React.FC<{ initialSubTab?: 'branches' | 'instruments' }> = ({
   initialSubTab = 'branches'
 }) => {
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
   const [subTab, setSubTab] = useState<'branches' | 'instruments'>(initialSubTab);
 
   return (
@@ -30,7 +32,31 @@ export const OwnerBranchesInstrumentsView: React.FC<{ initialSubTab?: 'branches'
 
         <div style={{ display: 'flex', backgroundColor: 'var(--surface-card)', padding: '0.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
           <button
-            onClick={() => setSubTab('branches')}
+            onClick={() => {
+              logQuery({
+                sourceButton: 'SubTab: [Studio Branches (3)]',
+                pageContext: 'Campus Infrastructure Console',
+                type: 'SELECT',
+                primaryTable: 'branches',
+                relatedTables: ['rooms', 'branch_instruments'],
+                sql: `SELECT 
+    b.id AS branch_id,
+    b.name AS campus_name,
+    b.address,
+    b.class_slots_count,
+    COUNT(r.id) AS total_studios,
+    COUNT(DISTINCT bi.instrument_id) AS taught_instruments
+FROM branches b
+LEFT JOIN rooms r ON b.id = r.branch_id
+LEFT JOIN branch_instruments bi ON b.id = bi.branch_id
+WHERE b.is_active = TRUE
+GROUP BY b.id, b.name, b.address, b.class_slots_count;`,
+                executionTimeMs: 2.7,
+                rowsAffected: '3 campuses returned with room aggregates',
+                dbmsConcept: 'Relational 1:N Join with aggregate GROUP BY'
+              });
+              setSubTab('branches');
+            }}
             style={{
               padding: '0.5rem 1rem',
               borderRadius: 'var(--radius-sm)',
@@ -43,7 +69,32 @@ export const OwnerBranchesInstrumentsView: React.FC<{ initialSubTab?: 'branches'
             Studio Branches (3)
           </button>
           <button
-            onClick={() => setSubTab('instruments')}
+            onClick={() => {
+              logQuery({
+                sourceButton: 'SubTab: [Instruments (7)]',
+                pageContext: 'Instruments Catalog Console',
+                type: 'SELECT',
+                primaryTable: 'instruments',
+                relatedTables: ['memberships', 'plan_pricings'],
+                sql: `SELECT 
+    i.id AS instrument_id,
+    i.name AS instrument_name,
+    i.category,
+    i.starting_price_per_month,
+    COUNT(DISTINCT ms.id) AS active_enrollments,
+    MIN(pp.base_monthly_rate) AS lowest_tier_rate
+FROM instruments i
+LEFT JOIN memberships ms ON i.id = ms.instrument_id AND ms.status = 'ACTIVE'
+LEFT JOIN plan_pricings pp ON i.id = pp.instrument_id
+WHERE i.is_active = TRUE
+GROUP BY i.id, i.name, i.category, i.starting_price_per_month
+ORDER BY i.name ASC;`,
+                executionTimeMs: 3.2,
+                rowsAffected: '7 disciplines retrieved',
+                dbmsConcept: 'Multi-table join across catalog & active enrollment snapshot'
+              });
+              setSubTab('instruments');
+            }}
             style={{
               padding: '0.5rem 1rem',
               borderRadius: 'var(--radius-sm)',

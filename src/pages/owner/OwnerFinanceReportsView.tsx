@@ -21,9 +21,11 @@ import {
   Info
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 
 export const OwnerFinanceReportsView: React.FC = () => {
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
 
   const [dateRange, setDateRange] = useState<'All Time' | 'This Quarter' | 'This Month'>('All Time');
   const [selectedBranch, setSelectedBranch] = useState<string>('all');
@@ -127,7 +129,49 @@ export const OwnerFinanceReportsView: React.FC = () => {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => showToast('Financial ledger statement exported (Demonstration CSV).', 'success')}
+          onClick={() => {
+            logQuery({
+              sourceButton: 'Button: [Export Financial Report]',
+              pageContext: 'Accounting Ledger Audit',
+              type: 'SELECT',
+              primaryTable: 'payments',
+              relatedTables: ['expenses', 'refunds', 'members', 'branches'],
+              sql: `-- Dual-entry financial ledger export query
+SELECT 
+    'PAYMENT' AS entry_type,
+    p.id AS voucher_number,
+    p.created_at AS transaction_timestamp,
+    p.amount AS credit_amount,
+    0.00 AS debit_amount,
+    p.method AS payment_channel,
+    b.name AS campus_name,
+    m.name AS student_payee
+FROM payments p
+INNER JOIN members m ON p.member_id = m.id
+INNER JOIN branches b ON p.branch_id = b.id
+WHERE p.status = 'COLLECTED'
+
+UNION ALL
+
+SELECT 
+    'EXPENSE' AS entry_type,
+    e.id AS voucher_number,
+    e.date AS transaction_timestamp,
+    0.00 AS credit_amount,
+    e.amount AS debit_amount,
+    e.category AS payment_channel,
+    b.name AS campus_name,
+    e.vendor AS student_payee
+FROM expenses e
+INNER JOIN branches b ON e.branch_id = b.id
+
+ORDER BY transaction_timestamp DESC;`,
+              executionTimeMs: 4.9,
+              rowsAffected: 'Dual-entry ledger rows materialized',
+              dbmsConcept: 'Immutable dual-entry accounting via UNION ALL query'
+            });
+            showToast('Financial ledger statement exported (Demonstration CSV).', 'success');
+          }}
           icon={<Download size={15} />}
         >
           Export Financial Report

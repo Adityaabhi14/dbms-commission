@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BookingProvider, useBooking } from './context/BookingContext';
 import { ToastProvider } from './context/ToastContext';
+import { QueryInspectorProvider } from './context/QueryInspectorContext';
+import { QueryInspectorWidget } from './components/queryInspector/QueryInspectorWidget';
 import { PublicNavbar } from './components/navigation/PublicNavbar';
 import { Footer } from './components/navigation/Footer';
 import { DemoBanner } from './components/common/DemoBanner';
@@ -174,6 +176,9 @@ const AppContent: React.FC = () => {
           />
         </>
       )}
+
+      {/* Global DBMS Live Query Inspector (Floating Trigger + Hovering Chatbox) */}
+      <QueryInspectorWidget />
     </div>
   );
 };
@@ -181,11 +186,14 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <ToastProvider>
-      <AuthProvider>
-        <BookingProvider>
-          <AppContent />
-        </BookingProvider>
-      </AuthProvider>
+      <QueryInspectorProvider>
+        <AuthProvider>
+          <BookingProvider>
+            <AppContent />
+          </BookingProvider>
+        </AuthProvider>
+      </QueryInspectorProvider>
     </ToastProvider>
   );
 }
+

@@ -10,6 +10,7 @@ import { SlotSelector } from './SlotSelector';
 import { BookingReview } from './BookingReview';
 import { PaymentConfirmation } from './PaymentConfirmation';
 import { Button } from '../../components/common/Button';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 
 interface BookingFlowPageProps {
@@ -42,6 +43,7 @@ export const BookingFlowPage: React.FC<BookingFlowPageProps> = ({
 
   const { loginAsClient } = useAuth();
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
 
   const stepsMeta = [
     { num: 1, label: 'Instrument' },
@@ -79,6 +81,60 @@ export const BookingFlowPage: React.FC<BookingFlowPageProps> = ({
 
   const handleConfirmed = (mode: 'UPI' | 'Card' | 'Net Banking' | 'Demo Cash') => {
     const booking = confirmBooking(mode);
+
+    const roomNumber = (booking.slotId % 5) + 1;
+
+    logQuery({
+      sourceButton: 'Button: [Confirm Booking & Authorize Payment]',
+      pageContext: 'Booking Transaction Engine',
+      type: 'TRANSACTION',
+      primaryTable: 'bookings',
+      relatedTables: ['rooms', 'payments', 'audit_logs'],
+      sql: `BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+-- 1. Pessimistic concurrency lock on studio room
+SELECT id, branch_id, room_number 
+FROM rooms 
+WHERE branch_id = '${booking.branchId}' AND room_number = ${roomNumber}
+FOR UPDATE;
+
+-- 2. Verify absence of overlapping active bookings
+SELECT COUNT(*) FROM bookings 
+WHERE branch_id = '${booking.branchId}' 
+  AND room_number = ${roomNumber} 
+  AND class_date = '${booking.firstClassDate}' 
+  AND slot_id = ${booking.slotId} 
+  AND status != 'CANCELLED';
+
+-- 3. Insert newly booked reservation
+INSERT INTO bookings (
+  id, member_id, branch_id, room_number, 
+  instrument_id, class_date, slot_id, slot_label, status
+) VALUES (
+  '${booking.id}', '${booking.memberId}', '${booking.branchId}', ${roomNumber}, 
+  '${booking.instrumentId}', '${booking.firstClassDate}', ${booking.slotId}, '${booking.slotLabel}', 'CONFIRMED'
+);
+
+-- 4. Insert collected payment voucher
+INSERT INTO payments (
+  id, booking_id, member_id, branch_id, 
+  amount, refund_amount, method, status
+) VALUES (
+  'RCPT-${Math.floor(9000 + Math.random() * 999)}', '${booking.id}', '${booking.memberId}', '${booking.branchId}', 
+  ${booking.totalPayable.toFixed(2)}, 0.00, '${mode}', 'COLLECTED'
+);
+
+-- 5. Record immutable audit log
+INSERT INTO audit_logs (id, entity_type, entity_id, action, performed_by_user_id)
+VALUES ('AUD-${Math.floor(10000 + Math.random() * 89999)}', 'BOOKING', '${booking.id}', 'CONFIRMED_ONLINE', '${booking.memberId}');
+
+COMMIT;`,
+      executionTimeMs: 4.8,
+      rowsAffected: '1 booking + 1 payment committed',
+      isolationLevel: 'READ COMMITTED',
+      dbmsConcept: 'ACID Transaction: Row Lock (FOR UPDATE) & Immutable Financial Ledger'
+    });
+
     // Auto-login as demo client so client portal displays this new booking seamlessly!
     loginAsClient();
     showToast(`Booking ${booking.id} created successfully!`, 'success');

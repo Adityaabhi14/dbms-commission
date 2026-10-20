@@ -28,9 +28,11 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 
 export const OwnerMembersView: React.FC = () => {
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
 
   const [members, setMembers] = useState<Member[]>(mockMembers);
   const [searchQuery, setSearchQuery] = useState('');
@@ -104,6 +106,42 @@ export const OwnerMembersView: React.FC = () => {
   };
 
   const handleRenewMember = (member: Member) => {
+    logQuery({
+      sourceButton: `Button: [Renew Membership — ${member.name}]`,
+      pageContext: 'Owner Member Operations',
+      type: 'TRANSACTION',
+      primaryTable: 'memberships',
+      relatedTables: ['notifications', 'audit_logs'],
+      sql: `BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+-- 1. Extend membership expiry date by 3 calendar months (dynamic date arithmetic)
+UPDATE memberships 
+SET expiry_date = (expiry_date + INTERVAL '3 months')::DATE,
+    status = 'ACTIVE',
+    updated_at = NOW()
+WHERE member_id = '${member.id}';
+
+-- 2. Dispatch renewal notification record
+INSERT INTO notifications (id, user_id, title, message, type, is_read)
+VALUES (
+  'NOTIF-${Math.floor(1000 + Math.random() * 8999)}', 
+  (SELECT user_id FROM members WHERE id = '${member.id}'), 
+  'Membership Extended (3 Months)', 
+  'Your music enrollment has been successfully renewed. Thank you for continuing your musical journey!', 
+  'BILLING', FALSE
+);
+
+-- 3. Audit trail
+INSERT INTO audit_logs (id, entity_type, entity_id, action, performed_by_user_id)
+VALUES ('AUD-${Math.floor(10000 + Math.random() * 89999)}', 'MEMBERSHIP', '${member.id}', 'RENEW_3_MONTHS', 'USR-O-001');
+
+COMMIT;`,
+      executionTimeMs: 4.1,
+      rowsAffected: '1 membership renewed + 1 notification queued',
+      isolationLevel: 'READ COMMITTED',
+      dbmsConcept: 'ACID Transaction: PostgreSQL calendar-month arithmetic with atomic audit logging'
+    });
+
     showToast(`Simulated renewal invoice sent to ${member.name}`, 'success');
   };
 
@@ -330,7 +368,36 @@ export const OwnerMembersView: React.FC = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setSelectedMember(member)}
+                              onClick={() => {
+                                logQuery({
+                                  sourceButton: `Button: [Inspect Member — ${member.name}]`,
+                                  pageContext: 'Student Directory Inspection',
+                                  type: 'SELECT',
+                                  primaryTable: 'members',
+                                  relatedTables: ['users', 'memberships'],
+                                  sql: `SELECT 
+    m.id AS student_id,
+    m.full_name,
+    m.email,
+    m.phone,
+    m.enrolled_instrument_id,
+    m.branch_id,
+    ms.start_date,
+    ms.expiry_date,
+    (ms.expiry_date - CURRENT_DATE) AS days_remaining,
+    ms.status AS membership_status,
+    m.emergency_contact,
+    m.notes
+FROM members m
+INNER JOIN memberships ms ON m.id = ms.member_id
+WHERE m.id = '${member.id}'
+LIMIT 1;`,
+                                  executionTimeMs: 2.1,
+                                  rowsAffected: '1 row retrieved',
+                                  dbmsConcept: 'Single-row primary key lookup (members.id = $1)'
+                                });
+                                setSelectedMember(member);
+                              }}
                               title="Inspect Member Details"
                               icon={<Eye size={15} />}
                             />

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import { ShieldCheck, UserCheck, Globe, LogOut } from 'lucide-react';
 
 interface DemoBannerProps {
@@ -16,6 +17,7 @@ export const DemoBanner: React.FC<DemoBannerProps> = ({
   currentView
 }) => {
   const { user, role, loginAsClient, loginAsOwner, logout } = useAuth();
+  const { logQuery } = useQueryInspector();
 
   return (
     <div
@@ -62,6 +64,19 @@ export const DemoBanner: React.FC<DemoBannerProps> = ({
 
         <button
           onClick={() => {
+            logQuery({
+              sourceButton: 'Quick Switch: [Public Site]',
+              pageContext: 'Public Navigation',
+              type: 'SELECT',
+              primaryTable: 'instruments',
+              sql: `SELECT id, name, category, starting_price_per_month, available_branches 
+FROM instruments 
+WHERE is_active = TRUE 
+ORDER BY name ASC;`,
+              executionTimeMs: 1.8,
+              rowsAffected: '7 records retrieved',
+              dbmsConcept: 'Read-only catalog projection'
+            });
             onNavigatePublic();
           }}
           style={{
@@ -83,6 +98,20 @@ export const DemoBanner: React.FC<DemoBannerProps> = ({
 
         <button
           onClick={() => {
+            logQuery({
+              sourceButton: 'Quick Switch: [Demo Client (Aarav)]',
+              pageContext: 'Client Portal Entry',
+              type: 'SELECT',
+              primaryTable: 'users',
+              relatedTables: ['members'],
+              sql: `SELECT u.id, u.email, u.role, m.id AS member_id, m.full_name, m.enrolled_instrument_id, m.branch_id
+FROM users u
+INNER JOIN members m ON u.id = m.user_id
+WHERE u.email = 'aarav.patel@example.com' AND u.role = 'CLIENT';`,
+              executionTimeMs: 2.2,
+              rowsAffected: '1 authenticated student tuple',
+              dbmsConcept: 'Foreign key 1:1 join users.id = members.user_id'
+            });
             loginAsClient();
             onNavigateClient();
           }}
@@ -105,6 +134,20 @@ export const DemoBanner: React.FC<DemoBannerProps> = ({
 
         <button
           onClick={() => {
+            logQuery({
+              sourceButton: 'Quick Switch: [Demo Owner (Director)]',
+              pageContext: 'Executive Console Entry',
+              type: 'SELECT',
+              primaryTable: 'users',
+              relatedTables: ['owner_profiles'],
+              sql: `SELECT u.id, u.email, u.role, op.id AS owner_profile_id, op.full_name, op.permissions
+FROM users u
+INNER JOIN owner_profiles op ON u.id = op.user_id
+WHERE u.email = 'director@apdmusicclass.com' AND u.role = 'OWNER';`,
+              executionTimeMs: 2.5,
+              rowsAffected: '1 executive owner profile',
+              dbmsConcept: 'Owner authorization and RBAC verification'
+            });
             loginAsOwner();
             onNavigateOwner();
           }}
@@ -128,6 +171,18 @@ export const DemoBanner: React.FC<DemoBannerProps> = ({
         {user && (
           <button
             onClick={() => {
+              logQuery({
+                sourceButton: 'Sign Out Action',
+                pageContext: 'Session Management',
+                type: 'UPDATE',
+                primaryTable: 'users',
+                sql: `UPDATE users 
+SET updated_at = NOW() 
+WHERE id = '${user.id}';`,
+                executionTimeMs: 1.6,
+                rowsAffected: 'Session invalidated',
+                dbmsConcept: 'Session termination and audit timestamp update'
+              });
               logout();
               onNavigatePublic();
             }}

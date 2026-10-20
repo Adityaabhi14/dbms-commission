@@ -7,6 +7,7 @@ import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { formatDatePretty } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
+import { useQueryInspector } from '../../context/QueryInspectorContext';
 import {
   GraduationCap,
   Plus,
@@ -24,6 +25,7 @@ import {
 
 export const OwnerTeachersView: React.FC = () => {
   const { showToast } = useToast();
+  const { logQuery } = useQueryInspector();
 
   const [teachers, setTeachers] = useState<Teacher[]>(mockTeachers);
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
@@ -88,6 +90,27 @@ export const OwnerTeachersView: React.FC = () => {
 
     setTeachers(prev => [newTeacher, ...prev]);
     setIsAddModalOpen(false);
+
+    logQuery({
+      sourceButton: `Button: [Add Faculty Mentor — ${formName}]`,
+      pageContext: 'Faculty Directory Management',
+      type: 'INSERT',
+      primaryTable: 'teachers',
+      relatedTables: ['teacher_instruments', 'teacher_branches'],
+      sql: `INSERT INTO teachers (
+  id, full_name, email, phone, instruments_taught, 
+  assigned_branches, availability, employment_status, joining_date, bio, rating, is_active
+) VALUES (
+  '${newTeacher.id}', '${formName}', '${formEmail}', '${formPhone || '+91 98000 00000'}', 
+  ARRAY[${formInstruments.map(i => `'${i}'`).join(', ')}], 
+  ARRAY[${formBranches.map(b => `'${b}'`).join(', ')}], 
+  '${formAvailability}', '${formStatus}', CURRENT_DATE, '${(formBio || 'Instructor').replace(/'/g, "''")}', 5.0, TRUE
+);`,
+      executionTimeMs: 3.8,
+      rowsAffected: '1 faculty mentor inserted',
+      dbmsConcept: 'Relational tuple insertion with normalized array constraints'
+    });
+
     showToast(`Faculty mentor ${formName} added to directory!`, 'success');
   };
 
@@ -113,6 +136,27 @@ export const OwnerTeachersView: React.FC = () => {
       )
     );
 
+    logQuery({
+      sourceButton: `Button: [Save Faculty Changes — ${formName}]`,
+      pageContext: 'Faculty Directory Management',
+      type: 'UPDATE',
+      primaryTable: 'teachers',
+      sql: `UPDATE teachers 
+SET full_name = '${formName}',
+    email = '${formEmail}',
+    phone = '${formPhone}',
+    instruments_taught = ARRAY[${formInstruments.map(i => `'${i}'`).join(', ')}],
+    assigned_branches = ARRAY[${formBranches.map(b => `'${b}'`).join(', ')}],
+    availability = '${formAvailability}',
+    employment_status = '${formStatus}',
+    bio = '${formBio.replace(/'/g, "''")}',
+    updated_at = NOW()
+WHERE id = '${editingTeacher.id}';`,
+      executionTimeMs: 2.9,
+      rowsAffected: '1 row updated',
+      dbmsConcept: 'Atomic entity update with timestamp concurrency tracking'
+    });
+
     setEditingTeacher(null);
     showToast(`Updated details for ${formName}`, 'success');
   };
@@ -120,6 +164,23 @@ export const OwnerTeachersView: React.FC = () => {
   const handleDeleteConfirm = () => {
     if (!deletingTeacher) return;
     setTeachers(prev => prev.filter(t => t.id !== deletingTeacher.id));
+
+    logQuery({
+      sourceButton: `Button: [Deactivate Mentor — ${deletingTeacher.name}]`,
+      pageContext: 'Faculty Directory Management',
+      type: 'UPDATE',
+      primaryTable: 'teachers',
+      sql: `-- Soft delete pattern to maintain referential integrity in existing booking history (3NF Rule)
+UPDATE teachers 
+SET is_active = FALSE,
+    employment_status = 'Deactivated',
+    updated_at = NOW()
+WHERE id = '${deletingTeacher.id}';`,
+      executionTimeMs: 3.1,
+      rowsAffected: '1 faculty member deactivated',
+      dbmsConcept: 'Soft-delete pattern preserving historical FK references in bookings'
+    });
+
     showToast(`Teacher ${deletingTeacher.name} removed from active roster.`, 'info');
     setDeletingTeacher(null);
   };
